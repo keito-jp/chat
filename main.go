@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"flag"
-	// "github.com/keito-jp/chat/trace"
-	// "os"
+	"github.com/keito-jp/chat/trace"
+	"os"
 )
 
 type templateHandler struct {
@@ -28,9 +28,11 @@ func main() {
 	var addr = flag.String("addr", ":8080", "アプリケーションのアドレス")
 	flag.Parse()
 	r := newRoom()
-	// r.tracer = trace.New(os.Stdout)
-	http.Handle("/", &templateHandler{filename: "chat.html"})
+	r.tracer = trace.New(os.Stdout)
+	http.Handle("/chat", MustAuth(&templateHandler{filename: "chat.html"}))
+	http.Handle("/login", &templateHandler{filename: "login.html"})
 	http.Handle("/room", r)
+	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("assets"))))
 	go r.run()
 	log.Println("Webサーバーを開始します。ポート: ", *addr)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
