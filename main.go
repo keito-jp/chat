@@ -1,20 +1,24 @@
 package main
 
 import (
-	"log"
-	"net/http"
-	"text/template"
-	"path/filepath"
-	"sync"
 	"flag"
 	"github.com/keito-jp/chat/trace"
+	"github.com/stretchr/gomniauth"
+	"github.com/stretchr/gomniauth/providers/facebook"
+	"github.com/stretchr/gomniauth/providers/github"
+	"github.com/stretchr/gomniauth/providers/google"
+	"log"
+	"net/http"
 	"os"
+	"path/filepath"
+	"sync"
+	"text/template"
 )
 
 type templateHandler struct {
-	once sync.Once
+	once     sync.Once
 	filename string
-	templ *template.Template
+	templ    *template.Template
 }
 
 func (t *templateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -27,10 +31,17 @@ func (t *templateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func main() {
 	var addr = flag.String("addr", ":8080", "アプリケーションのアドレス")
 	flag.Parse()
+	gomniauth.SetSecurityKey(os.Getenv("FUNNYCHAT_SECURITY_KEY"))
+	gomniauth.WithProviders(
+		facebook.New(os.Getenv("FB_CLIENT_ID"), os.Getenv("FB_SECRET_KEY"), "http://localhost:8080/auth/callback/facebook"),
+		google.New(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_SECRET_KEY"), "http://localhost:8080/auth/callback/google"),
+		github.New(os.Getenv("GITHUB_CLIENT_ID"), os.Getenv("GITHUB_SECRET_KEY"), "http://localhost:8080/auth/callback/github"),
+	)
 	r := newRoom()
 	r.tracer = trace.New(os.Stdout)
 	http.Handle("/chat", MustAuth(&templateHandler{filename: "chat.html"}))
 	http.Handle("/login", &templateHandler{filename: "login.html"})
+	http.HandleFunc("/auth/", loginHandler)
 	http.Handle("/room", r)
 	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("assets"))))
 	go r.run()
