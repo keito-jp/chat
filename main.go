@@ -16,7 +16,11 @@ import (
 	"text/template"
 )
 
-var avatars Avatar = UseFileSystemAvatar
+var avatars Avatar = TryAvatars{
+	UseFileSystemAvatar,
+	UseAuthAvatar,
+	UseGravatar,
+}
 
 type templateHandler struct {
 	once     sync.Once
@@ -46,7 +50,7 @@ func main() {
 		google.New(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_SECRET_KEY"), "http://localhost:8080/auth/callback/google"),
 		github.New(os.Getenv("GITHUB_CLIENT_ID"), os.Getenv("GITHUB_SECRET_KEY"), "http://localhost:8080/auth/callback/github"),
 	)
-	r := newRoom(UseFileSystemAvatar)
+	r := newRoom()
 	r.tracer = trace.New(os.Stdout)
 	http.Handle("/chat", MustAuth(&templateHandler{filename: "chat.html"}))
 	http.Handle("/login", &templateHandler{filename: "login.html"})
