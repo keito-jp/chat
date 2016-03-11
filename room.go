@@ -1,29 +1,40 @@
 package main
 
 import (
-	"log"
-	"net/http"
+	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/websocket"
 	"github.com/keito-jp/chat/trace"
 	"github.com/stretchr/objx"
+	"log"
+	"net/http"
 )
 
 type room struct {
-	forward chan *message
-	join chan *client
-	leave chan *client
+	// forward chan *message
+	join    chan *client
+	leave   chan *client
 	clients map[*client]bool
-	tracer trace.Tracer
+	tracer  trace.Tracer
+	psc redis.PubSubConn
 }
 
-func newRoom() *room {
+func newRoom(c redis.Conn) *room {
 	return &room{
-		forward: make(chan *message),
-		join: make(chan *client),
-		leave: make(chan *client),
+		// forward: make(chan *message),
+		join:    make(chan *client),
+		leave:   make(chan *client),
 		clients: make(map[*client]bool),
-		tracer: trace.Off(),
+		tracer:  trace.Off(),
+		psc: redis.PubSubConn{Conn: c},
 	}
+}
+
+func (r *room) subscribe(channel string) {
+	if r.psc.Conn == nil {
+		log.Println("subscribeできません。psc.Connがセットされていません。")
+		return
+	}
+	r.psc.Subscribe(channel)
 }
 
 func (r *room) run() {
@@ -36,7 +47,18 @@ func (r *room) run() {
 			delete(r.clients, client)
 			close(client.send)
 			r.tracer.Trace("クライアントが退室しました")
-		case msg := <-r.forward:
+		// case msg := <-r.forward:
+		}
+	}
+}
+
+func (r *room) receive() {
+
+	for {
+		switch n := r.psc.Receive().(type) {
+		case redis.Message:
+			msg := decodeJson(n.Data)
+			// log.Println("Message: ", n.Channel, msg)
 			r.tracer.Trace("メッセージを受信しました: ", msg.Message)
 			for client := range r.clients {
 				select {
@@ -50,12 +72,16 @@ func (r *room) run() {
 					r.tracer.Trace(" -- 送信に失敗しました。クライアントをクリーンアップします")
 				}
 			}
+		case redis.Subscription:
+			log.Println("Subscription: ", n.Kind, n.Channel, n.Count)
+		case error:
+			log.Println("error: ", n)
 		}
 	}
 }
 
 const (
-	socketBufferSize = 1024
+	socketBufferSize  = 1024
 	messageBufferSize = 256
 )
 
@@ -73,10 +99,10 @@ func (r *room) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		log.Fatal("クッキーの取得に失敗しました:", err)
 		return
 	}
-	client := &client {
-		socket: socket,
-		send: make(chan *message, messageBufferSize),
-		room: r,
+	client := &client{
+		socket:   socket,
+		send:     make(chan *message, messageBufferSize),
+		room:     r,
 		userData: objx.MustFromBase64(authCookie.Value),
 	}
 	r.join <- client

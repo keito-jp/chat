@@ -2,12 +2,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/keito-jp/chat/trace"
 	"github.com/stretchr/gomniauth"
 	"github.com/stretchr/gomniauth/providers/facebook"
 	"github.com/stretchr/gomniauth/providers/github"
 	"github.com/stretchr/gomniauth/providers/google"
 	"github.com/stretchr/objx"
+	"github.com/garyburd/redigo/redis"
 	"log"
 	"net/http"
 	"os"
@@ -44,14 +46,26 @@ func (t *templateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func main() {
 	var addr = flag.String("addr", ":8080", "アプリケーションのアドレス")
 	flag.Parse()
+
+	c, err := redis.Dial("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer c.Close()
+	log.Println("Redisにせつぞくしました。")
+
 	gomniauth.SetSecurityKey(os.Getenv("FUNNYCHAT_SECURITY_KEY"))
 	gomniauth.WithProviders(
 		facebook.New(os.Getenv("FB_CLIENT_ID"), os.Getenv("FB_SECRET_KEY"), "http://localhost:8080/auth/callback/facebook"),
 		google.New(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_SECRET_KEY"), "http://localhost:8080/auth/callback/google"),
 		github.New(os.Getenv("GITHUB_CLIENT_ID"), os.Getenv("GITHUB_SECRET_KEY"), "http://localhost:8080/auth/callback/github"),
 	)
-	r := newRoom()
+
+	r := newRoom(c)
+	r.subscribe("room01")
 	r.tracer = trace.New(os.Stdout)
+
 	http.Handle("/chat", MustAuth(&templateHandler{filename: "chat.html"}))
 	http.Handle("/login", &templateHandler{filename: "login.html"})
 	http.HandleFunc("/auth/", loginHandler)
@@ -71,6 +85,7 @@ func main() {
 	http.Handle("/avatars/", http.StripPrefix("/avatars/", http.FileServer(http.Dir("./avatars"))))
 	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("assets"))))
 	go r.run()
+	go r.receive()
 	log.Println("Webサーバーを開始します。ポート: ", *addr)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
 		log.Fatal("ListenAndServe:", err)

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"github.com/gorilla/websocket"
+	"github.com/garyburd/redigo/redis"
 	"time"
+	// "log"
 )
 
 type client struct {
@@ -10,6 +13,16 @@ type client struct {
 	send chan *message
 	room *room
 	userData map[string]interface{}
+}
+
+func publish(channel, value interface{}) {
+	c, err := redis.Dial("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer c.Close()
+	c.Do("PUBLISH", channel, value)
 }
 
 func (c *client) read() {
@@ -21,7 +34,8 @@ func (c *client) read() {
 			if avatarURL, ok := c.userData["avatar_url"]; ok {
 				msg.AvatarURL = avatarURL.(string)
 			}
-			c.room.forward <- msg
+			publish("room01", msg.encodeJson())
+			// c.room.forward <- msg
 		} else {
 			break
 		}
